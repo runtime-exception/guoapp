@@ -2,9 +2,7 @@ name: guoapp-web
 
 services:
   guoapp-web:
-    image: guoapp-web:local
-    build:
-      context: .
+    image: "${GUOAPP_WEB_IMAGE:-ghcr.io/runtime-exception/guoapp-web:latest}"
     container_name: guoapp-web
     restart: unless-stopped
     ports:

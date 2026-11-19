@@ -92,16 +92,27 @@ Flutter 多端独立影视应用，手机、平板、电脑和电视分别适配
 
 ### Web 部署
 
+推送到 `main` 后，GitHub Actions 会构建并发布 `linux/amd64` 和 `linux/arm64` 的 Web 镜像。Docker Compose 默认从 `ghcr.io/runtime-exception/guoapp-web:latest` 拉取适合宿主机架构的版本。首次部署请等 [Web 镜像工作流](https://github.com/runtime-exception/guoapp/actions/workflows/web-image.yml) 构建成功。私有镜像需要先在部署服务器上执行 `docker login ghcr.io`，使用有权读取该镜像的 GitHub 账号和带 `read:packages` 权限的经典个人访问令牌。
+
 仓库的 `.env` 提供部署默认值。复制 `.env.example` 为本地的 `.env.local`，在其中设置至少 12 位的访问密码，以及本机的端口、地址和站源路径。把已有站源模块放到自行管理的目录，每个模块用站源 ID 作为子目录，里面包含 `manifest.json` 和 `main.js`。将 `GUOAPP_WEB_MODULES_DIR` 指向这个目录，默认配置加载仓库里的离线演示站源。默认绑定 `127.0.0.1:8000`，同一局域网的手机访问时，把 `GUOAPP_WEB_HOST` 改为 Docker 宿主机的局域网 IP。
 
 ```sh
 cp .env.example .env.local
 # 编辑 .env.local，填入部署密码和本机配置
-docker compose --env-file .env --env-file .env.local up -d --build --wait
+docker compose --env-file .env --env-file .env.local up -d --pull always --wait
 docker compose --env-file .env --env-file .env.local ps
 ```
 
+更新时在部署服务器上执行 `git pull --ff-only`，然后重新执行上面的 `up` 命令。可在 `.env.local` 设置 `GUOAPP_WEB_IMAGE`，使用指定镜像或 `sha-<完整提交 SHA>` 标签。
+
 手机 Safari 打开 `http://<宿主机局域网 IP>:8000`，输入访问密码，进入剧集详情后选集，再点播放器的播放按钮。Web 端支持 Safari 兼容的 HLS 和 MP4，能否播放取决于站源提供的线路和编码。
+
+本地开发时可以从源码构建镜像。
+
+```sh
+docker compose --env-file .env --env-file .env.local \
+  -f docker-compose.yml -f docker-compose.build.yml up -d --wait
+```
 
 默认 HTTP 供可信局域网使用。外网访问请通过 HTTPS 反向代理，保留原始 `Host` 请求头，并设置 `GUOAPP_WEB_SECURE_COOKIE=true`。更换站源模块后重启容器即可重新加载。
 
