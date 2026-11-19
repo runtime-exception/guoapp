@@ -76,6 +76,7 @@ Flutter 多端独立影视应用，手机、平板、电脑和电视分别适配
 | Windows 10/11 x64 | 安装包 `*-setup.exe`，默认安装到当前用户、无需管理员权限；或便携 ZIP，解压后运行 `guoapp.exe`，保留所有 DLL 与 `data` 目录；便携版的设置、记录、缓存和默认下载都存在程序旁的 `userdata` 目录，删掉该目录则改回存到系统用户目录 |
 | iOS 15.1+ | 未签名 IPA，需自行签名或用 iloader 等工具侧载 |
 | macOS 12+ | 通用 dmg（Apple 芯片与 Intel），打开后拖入「应用程序」；未经公证，首次打开前需解除隔离（见下方） |
+| 手机浏览器 | 用 Docker Compose 自托管，支持密码登录、站源分类、搜索、选集和 Safari 播放。见 [Web 部署](#web-部署) |
 
 > [!TIP]
 > Android 安装提示 `INSTALL_FAILED_NO_MATCHING_ABIS` 表示 APK 与设备架构不匹配，请换对应架构的安装包。
@@ -88,6 +89,32 @@ Flutter 多端独立影视应用，手机、平板、电脑和电视分别适配
 > ```
 
 ## 使用说明
+
+### Web 部署
+
+推送到 `main` 后，GitHub Actions 会构建并发布 `linux/amd64` 和 `linux/arm64` 的 Web 镜像。Docker Compose 默认从 `ghcr.io/runtime-exception/guoapp-web:latest` 拉取适合宿主机架构的版本。首次部署请等 [Web 镜像工作流](https://github.com/runtime-exception/guoapp/actions/workflows/web-image.yml) 构建成功。私有镜像需要先在部署服务器上执行 `docker login ghcr.io`，使用有权读取该镜像的 GitHub 账号和带 `read:packages` 权限的经典个人访问令牌。
+
+Compose 提供部署默认值。复制 `.env.example` 为本地的 `.env.local`，在其中设置至少 12 位的访问密码，以及本机的端口、地址和站源路径。把已有站源模块放到自行管理的目录，每个模块用站源 ID 作为子目录，里面包含 `manifest.json` 和 `main.js`。将 `GUOAPP_WEB_MODULES_DIR` 指向这个目录，默认配置加载仓库里的离线演示站源。默认绑定 `127.0.0.1:8000`，同一局域网的手机访问时，把 `GUOAPP_WEB_HOST` 改为 Docker 宿主机的局域网 IP。
+
+```sh
+cp .env.example .env.local
+# 编辑 .env.local，填入部署密码和本机配置
+docker compose --env-file .env.local up -d --pull always --wait
+docker compose --env-file .env.local ps
+```
+
+更新时在部署服务器上执行 `git pull --ff-only`，然后重新执行上面的 `up` 命令。可在 `.env.local` 设置 `GUOAPP_WEB_IMAGE`，使用指定镜像或 `sha-<完整提交 SHA>` 标签。
+
+手机 Safari 打开 `http://<宿主机局域网 IP>:8000`，输入访问密码，进入剧集详情后选集，再点播放器的播放按钮。Web 端支持 Safari 兼容的 HLS 和 MP4，能否播放取决于站源提供的线路和编码。红果 HEIC 封面由服务端转为 JPEG，可在 Chrome、Edge、Firefox 和 Safari 显示。
+
+本地开发时可以从源码构建镜像。
+
+```sh
+docker compose --env-file .env.local \
+  -f docker-compose.yml -f docker-compose.build.yml up -d --wait
+```
+
+默认 HTTP 供可信局域网使用。外网访问请通过 HTTPS 反向代理，保留原始 `Host` 请求头，并设置 `GUOAPP_WEB_SECURE_COOKIE=true`。登录按连接来源 IP 限流。若反向代理导致所有用户共用同一来源地址，将 `GUOAPP_WEB_TRUSTED_PROXY` 设置为直接连接 Web 服务的代理 IP，并让代理覆盖客户端传入的 `X-Real-IP`，填入真实客户端地址。更换站源模块后重启容器即可重新加载。
 
 ### 首次打开
 

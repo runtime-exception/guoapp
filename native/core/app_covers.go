@@ -39,6 +39,7 @@ type nativeCoverCall struct {
 }
 
 type nativeCoverCache struct {
+	transform   func(context.Context, []byte) ([]byte, error)
 	directory   string
 	downloader  *Downloader
 	mu          sync.Mutex
@@ -156,6 +157,9 @@ func (cache *nativeCoverCache) fetch(key string, drama LibraryDrama, referer, fa
 	select {
 	case cache.slots <- struct{}{}:
 		data, err = cache.download(ctx, drama.Cover, referer)
+		if err == nil && cache.transform != nil {
+			data, err = cache.transform(ctx, data)
+		}
 		<-cache.slots
 	case <-ctx.Done():
 		err = ctx.Err()

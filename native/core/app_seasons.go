@@ -10,7 +10,7 @@ type nativeSeason struct {
 	Drama  LibraryDrama `json:"drama"`
 }
 
-func (engine *nativeEngine) nativeSeasons(ctx context.Context, drama LibraryDrama) (any, error) {
+func (engine *nativeEngine) seasonItems(ctx context.Context, drama LibraryDrama) ([]nativeSeason, error) {
 	source, sourceID, valid := SplitProviderDramaID(drama.ID)
 	if !valid {
 		return nil, errors.New("剧集信息无效")
@@ -22,7 +22,7 @@ func (engine *nativeEngine) nativeSeasons(ctx context.Context, drama LibraryDram
 	items := []nativeSeason{}
 	provider, ok := providerAs[SeasonProvider](p)
 	if !ok {
-		return map[string]any{"items": items}, nil
+		return items, nil
 	}
 	seasons, err := provider.Seasons(ctx, sourceID)
 	if err != nil {
@@ -39,5 +39,5 @@ func (engine *nativeEngine) nativeSeasons(ctx context.Context, drama LibraryDram
 	if !current || len(items) < 2 {
 		items = items[:0]
 	}
-	return map[string]any{"items": items}, nil
+	return items, nil
 }

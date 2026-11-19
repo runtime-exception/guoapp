@@ -1,0 +1,6 @@
+services:
+  guoapp-web:
+    image: guoapp-web:local
+    pull_policy: build
+    build:
+      context: .
