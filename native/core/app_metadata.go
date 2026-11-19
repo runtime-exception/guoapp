@@ -42,7 +42,7 @@ func (engine *nativeEngine) nativeFollowCheck(ctx context.Context, drama Library
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"drama": result.(map[string]any)["drama"]}, nil
+	return map[string]any{"drama": result.Drama}, nil
 }
 
 func (engine *nativeEngine) nativeMetadata(ctx context.Context, drama LibraryDrama) (any, error) {

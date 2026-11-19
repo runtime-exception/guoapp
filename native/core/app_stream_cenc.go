@@ -111,6 +111,10 @@ func (stream *nativeStreamServer) nativeDecrypt(ctx context.Context, token strin
 	if session == nil {
 		return errors.New("播放已结束")
 	}
+	return stream.prepareCENC(ctx, session, media)
+}
+
+func (stream *nativeStreamServer) prepareCENC(ctx context.Context, session *nativeStreamSession, media ProviderMedia) error {
 	session.cencKey = media.CENCKey
 	_, err := stream.cencLayout(providerMediaContext(ctx, session.credentials), session, media.URL)
 	return err

@@ -21,6 +21,9 @@ import (
 	"time"
 )
 
+const nativeStreamCapacity = 8
+const nativeStreamIdleTimeout = 10 * time.Minute
+
 type nativeStreamAsset struct {
 	kind        string
 	address     string
@@ -40,6 +43,7 @@ type nativeStreamSession struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	lastUsed     time.Time
+	active       int
 	diagnosticID string
 	cencKey      []byte
 	cencMu       sync.Mutex
@@ -90,6 +94,9 @@ func (stream *nativeStreamServer) lanClose() {
 }
 
 func (stream *nativeStreamServer) lanPlaylist(request *http.Request, body string) string {
+	if request.Context().Value(webMediaRequest{}) != nil {
+		return strings.ReplaceAll(body, stream.address+"/", WebMediaPrefix)
+	}
 	if origin := "http://" + request.Host; origin != stream.address {
 		return strings.ReplaceAll(body, stream.address+"/", origin+"/")
 	}
@@ -123,29 +130,28 @@ func newNativeStreamServer(d *Downloader) (*nativeStreamServer, error) {
 	if err != nil {
 		return nil, errors.New("无法初始化本机播放器")
 	}
-	stream := &nativeStreamServer{downloader: d, address: "http://" + listener.Addr().String(), sessions: map[string]*nativeStreamSession{}}
+	stream := newNativeStream(d, "http://"+listener.Addr().String())
 	server := &http.Server{Handler: http.HandlerFunc(stream.nativeServe), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16384}
 	stream.server = server
 	go func() { _ = server.Serve(listener) }()
 	return stream, nil
 }
 
+func newNativeStream(d *Downloader, address string) *nativeStreamServer {
+	return &nativeStreamServer{downloader: d, address: address, sessions: make(map[string]*nativeStreamSession)}
+}
+
 func (stream *nativeStreamServer) nativeOpen(media ProviderMedia) (string, string) {
-	tokenBytes := make([]byte, 24)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		panic(err)
-	}
-	token := hex.EncodeToString(tokenBytes)
-	ctx, cancel := context.WithCancel(providerMediaContext(context.Background(), media.Credentials))
-	session := &nativeStreamSession{assets: map[string]nativeStreamAsset{}, referer: media.Referer, key: media.HLSKey, ctx: ctx, cancel: cancel, lastUsed: time.Now(), credentials: media.Credentials, diagnosticID: nativeStreamID(token)}
+	address, token, session := stream.prepare(media)
+
 	stream.mu.Lock()
 	for id, old := range stream.sessions {
-		if time.Since(old.lastUsed) > 10*time.Minute {
+		if time.Since(old.lastUsed) > nativeStreamIdleTimeout {
 			stream.nativeCancel(old, "idle_expired")
 			delete(stream.sessions, id)
 		}
 	}
-	if len(stream.sessions) >= 8 {
+	if len(stream.sessions) >= nativeStreamCapacity {
 		oldest := ""
 		for id, old := range stream.sessions {
 			if oldest == "" || old.lastUsed.Before(stream.sessions[oldest].lastUsed) {
@@ -157,6 +163,17 @@ func (stream *nativeStreamServer) nativeOpen(media ProviderMedia) (string, strin
 	}
 	stream.sessions[token] = session
 	stream.mu.Unlock()
+	return address, token
+}
+
+func (stream *nativeStreamServer) prepare(media ProviderMedia) (string, string, *nativeStreamSession) {
+	tokenBytes := make([]byte, 24)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		panic(err)
+	}
+	token := hex.EncodeToString(tokenBytes)
+	ctx, cancel := context.WithCancel(providerMediaContext(context.Background(), media.Credentials))
+	session := &nativeStreamSession{assets: map[string]nativeStreamAsset{}, referer: media.Referer, key: media.HLSKey, ctx: ctx, cancel: cancel, lastUsed: time.Now(), credentials: media.Credentials, diagnosticID: nativeStreamID(token)}
 	entry := nativeStreamAsset{kind: "media", address: media.URL, contentType: "video/mp4"}
 	parsedURL, parseErr := url.Parse(media.URL)
 	isHLS := media.Playlist != "" || (parseErr == nil && strings.HasSuffix(strings.ToLower(parsedURL.Path), ".m3u8"))
@@ -170,7 +187,7 @@ func (stream *nativeStreamServer) nativeOpen(media ProviderMedia) (string, strin
 	if isHLS || strings.Contains(entry.contentType, "mpegurl") {
 		entry.kind = "entry_playlist"
 	}
-	return stream.nativeAsset(token, session, entry), token
+	return stream.nativeAsset(token, session, entry), token, session
 }
 
 func (stream *nativeStreamServer) nativeCancel(session *nativeStreamSession, reason string) {
@@ -304,12 +321,27 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 		http.NotFound(writer, request)
 		return
 	}
+	web := request.Context().Value(webMediaRequest{}) != nil
 	stream.mu.Lock()
 	session := stream.sessions[parts[0]]
+	if web {
+		session = stream.webSessionLocked(parts[0], time.Now())
+	}
 	if session != nil {
 		session.lastUsed = time.Now()
+		if web {
+			session.active++
+		}
 	}
 	stream.mu.Unlock()
+	if web && session != nil {
+		defer func() {
+			stream.mu.Lock()
+			session.active--
+			session.lastUsed = time.Now()
+			stream.mu.Unlock()
+		}()
+	}
 	if session == nil {
 		http.Error(writer, "播放已结束", http.StatusGone)
 		return

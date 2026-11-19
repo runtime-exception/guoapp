@@ -460,7 +460,8 @@ func nativeDispatch(input nativeInput) (any, error) {
 	case "detail":
 		return engine.nativeDetail(ctx, input.Drama)
 	case "seasons":
-		return engine.nativeSeasons(ctx, input.Drama)
+		items, err := engine.seasonItems(ctx, input.Drama)
+		return map[string]any{"items": items}, err
 	case "metadata":
 		return engine.nativeMetadata(ctx, input.Drama)
 	case "followCheck":
@@ -611,21 +612,27 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 	return result, nil
 }
 
-func (engine *nativeEngine) nativeDetail(ctx context.Context, drama LibraryDrama) (any, error) {
+type nativeDetailResult struct {
+	Drama    LibraryDrama `json:"drama"`
+	Chapters []Chapter    `json:"chapters"`
+	Warning  string       `json:"warning"`
+}
+
+func (engine *nativeEngine) nativeDetail(ctx context.Context, drama LibraryDrama) (nativeDetailResult, error) {
 	source, sourceID, valid := SplitProviderDramaID(drama.ID)
 	if !valid {
-		return nil, errors.New("剧集信息无效，请刷新剧库")
+		return nativeDetailResult{}, errors.New("剧集信息无效，请刷新剧库")
 	}
 	p, ok := engine.downloader.provider(source)
 	if !ok {
-		return nil, errors.New("请选择有效站源")
+		return nativeDetailResult{}, errors.New("请选择有效站源")
 	}
 	raw, chapters, err := p.Detail(ctx, sourceID)
 	if err != nil {
-		return nil, err
+		return nativeDetailResult{}, err
 	}
 	if len(chapters) == 0 {
-		return nil, errors.New("该剧暂时没有可播放的分集")
+		return nativeDetailResult{}, errors.New("该剧暂时没有可播放的分集")
 	}
 	if raw.ID == drama.ID {
 		drama = MergeNativeDrama(drama, NativeNormalize(raw))
@@ -638,7 +645,7 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama LibraryDrama
 	if err := engine.saveDetailMetadata(drama); err != nil {
 		warning = err.Error()
 	}
-	return map[string]any{"drama": drama, "chapters": chapters, "warning": warning}, nil
+	return nativeDetailResult{Drama: drama, Chapters: chapters, Warning: warning}, nil
 }
 
 func (engine *nativeEngine) nativeResolve(ctx context.Context, input nativeInput) (nativePlan, error) {
